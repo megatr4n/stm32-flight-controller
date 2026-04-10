@@ -1,17 +1,21 @@
 #include "STM32_I2C.h"
+#include <string.h>
 
 namespace HAL {
-    STM32_I2C::STM32_I2C() {
-
-    }
+    STM32_I2C::STM32_I2C() {}
 
     bool STM32_I2C::init() {
-        __HAL_RCC_GPIOB_CLK_ENABLE();
         __HAL_RCC_I2C1_CLK_ENABLE();
+        __HAL_RCC_GPIOB_CLK_ENABLE();
+
+        __HAL_RCC_I2C1_FORCE_RESET();
+        HAL_Delay(10);
+        __HAL_RCC_I2C1_RELEASE_RESET();
 
         GPIO_InitTypeDef GPIO_InitStruct = {0};
         GPIO_InitStruct.Pin = GPIO_PIN_6 | GPIO_PIN_7;
         GPIO_InitStruct.Mode = GPIO_MODE_AF_OD;
+        GPIO_InitStruct.Pull = GPIO_PULLUP;
         GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
         HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
@@ -25,19 +29,29 @@ namespace HAL {
         hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
         hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
 
-        if (HAL_I2C_Init(&hi2c1) == HAL_OK) {
-            return true;
-        }
-        return false;
+        return (HAL_I2C_Init(&hi2c1) == HAL_OK);
     }
+
     bool STM32_I2C::readRegister(uint8_t deviceAddress, uint8_t registerAddress, uint8_t* data, uint16_t length) {
-        HAL_StatusTypeDef status = HAL_I2C_Mem_Read(&hi2c1, deviceAddress, registerAddress, 1, data, length, 100);
+        HAL_StatusTypeDef status = HAL_I2C_Master_Transmit(
+            &hi2c1, deviceAddress, &registerAddress, 1, 1000
+        );
+        if (status != HAL_OK) return false;
+    
+        status = HAL_I2C_Master_Receive(
+            &hi2c1, deviceAddress, data, length, 1000
+        );
         return (status == HAL_OK);
     }
 
     bool STM32_I2C::writeRegister(uint8_t deviceAddress, uint8_t registerAddress, uint8_t* data, uint16_t length) {
-        HAL_StatusTypeDef status = HAL_I2C_Mem_Write(&hi2c1, deviceAddress, registerAddress, 1, data, length, 100);
+        uint8_t buf[length + 1];
+        buf[0] = registerAddress;
+        memcpy(buf + 1, data, length);
+    
+        HAL_StatusTypeDef status = HAL_I2C_Master_Transmit(
+            &hi2c1, deviceAddress, buf, length + 1, 1000
+        );
         return (status == HAL_OK);
     }
-
 }

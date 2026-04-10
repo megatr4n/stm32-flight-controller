@@ -3,9 +3,9 @@
 
 namespace HAL {
 
-extern UART_HandleTypeDef huart2;
+extern UART_HandleTypeDef huart1;
 
-void UART2_Init(void);
+void UART1_Init(void);
 void UART_Print(const char* text);
 
 }

@@ -22,6 +22,8 @@
     [ "stm32:3V3.1", "gyro:VCC", "red", ["h20"] ],
     [ "stm32:GND.1", "gyro:GND", "black", ["h20"] ],
     [ "stm32:B6", "gyro:SCL", "cyan", ["h20"] ],
-    [ "stm32:B7", "gyro:SDA", "green", ["h20"] ]
+    [ "stm32:B7", "gyro:SDA", "green", ["h20"] ],
+    [ "stm32:A9", "$serialMonitor:RX", "green", [] ],
+    [ "stm32:A10", "$serialMonitor:TX", "green", [] ]
   ]
 }
