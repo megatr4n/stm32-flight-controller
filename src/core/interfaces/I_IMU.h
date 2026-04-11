@@ -12,6 +12,9 @@ struct IMUData {
     Vector3D accel;
     Vector3D gyro;
     float temp;
+
+    float pitch;
+    float roll;
 };
 
 class I_IMU {
