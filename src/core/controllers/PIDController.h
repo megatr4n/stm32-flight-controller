@@ -31,10 +31,10 @@ namespace Core {
             prevError = error;
 
             float output = pTerm + iTerm + dTerm;
-            if (output < config.maxOutput)
+            if (output > config.maxOutput)
                 output = config.maxOutput;
 
-            if (output > config.minOutput)
+            if (output < config.minOutput)
                 output = config.minOutput;
 
             return output;
