@@ -6,6 +6,8 @@
 #include "core/controllers/PIDController.h"
 #include "core/controllers/MotorMixer.h"
 
+#include "hal/pwm_driver.h"
+
 #include <stdio.h>
 
 using namespace HAL;
@@ -53,6 +55,13 @@ int main(void) {
     }
     UART_Print("Sensors OK!\r\n");
 
+    PWMDriver pwm;
+    if (!pwm.init()) {
+        UART_Print("ERROR: PWM Timers Failed!\r\n");
+        while(1);
+    }
+    UART_Print("PWM Timers Initialized!\r\n");
+
     PIDConfig pitchConfig = {2.0f, 0.0f, 0.5f, -400.0f, 400.0f, 100.0f};
     PIDConfig rollConfig  = {2.0f, 0.0f, 0.5f, -400.0f, 400.0f, 100.0f};
 
@@ -79,6 +88,8 @@ int main(void) {
 
         uint16_t baseThrottle = 1300; 
         MotorSpeeds speeds = MotorMixer::mix(baseThrottle, pitchCorrection, rollCorrection);
+
+        pwm.setMotorSpeeds(speeds.frontLeft, speeds.frontRight, speeds.rearLeft, speeds.rearRight);
 
         snprintf(buffer, sizeof(buffer), 
                  "P: %3d R: %3d || M1: %d | M2: %d | M3: %d | M4: %d\r\n",

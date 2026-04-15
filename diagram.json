@@ -16,14 +16,58 @@
       "top": 80,
       "left": 250,
       "attrs": {}
+    },
+    {
+      "type": "wokwi-servo",
+      "id": "m1_fl",
+      "top": -150,
+      "left": -100,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-servo",
+      "id": "m2_fr",
+      "top": -150,
+      "left": 150,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-servo",
+      "id": "m3_rl",
+      "top": 150,
+      "left": -100,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-servo",
+      "id": "m4_rr",
+      "top": 150,
+      "left": 150,
+      "attrs": {}
     }
   ],
   "connections": [
-    [ "stm32:3V3.1", "gyro:VCC", "red", ["h20"] ],
-    [ "stm32:GND.1", "gyro:GND", "black", ["h20"] ],
-    [ "stm32:B6", "gyro:SCL", "cyan", ["h20"] ],
-    [ "stm32:B7", "gyro:SDA", "green", ["h20"] ],
+    [ "stm32:3V3.1", "gyro:VCC", "red", [ "h20" ] ],
+    [ "stm32:GND.1", "gyro:GND", "black", [ "h20" ] ],
+    [ "stm32:B6", "gyro:SCL", "cyan", [ "h20" ] ],
+    [ "stm32:B7", "gyro:SDA", "green", [ "h20" ] ],
     [ "stm32:A9", "$serialMonitor:RX", "green", [] ],
-    [ "stm32:A10", "$serialMonitor:TX", "green", [] ]
+    [ "stm32:A10", "$serialMonitor:TX", "green", [] ],
+    
+    [ "m1_fl:V+", "stm32:5V", "red", [] ],
+    [ "m1_fl:GND", "stm32:GND.1", "black", [] ],
+    [ "m1_fl:PWM", "stm32:A0", "orange", [] ],
+    
+    [ "m2_fr:V+", "stm32:5V", "red", [] ],
+    [ "m2_fr:GND", "stm32:GND.1", "black", [] ],
+    [ "m2_fr:PWM", "stm32:A1", "orange", [] ],
+    
+    [ "m3_rl:V+", "stm32:5V", "red", [] ],
+    [ "m3_rl:GND", "stm32:GND.2", "black", [] ],
+    [ "m3_rl:PWM", "stm32:A2", "orange", [] ],
+    
+    [ "m4_rr:V+", "stm32:5V", "red", [] ],
+    [ "m4_rr:GND", "stm32:GND.2", "black", [] ],
+    [ "m4_rr:PWM", "stm32:A3", "orange", [] ]
   ]
 }
