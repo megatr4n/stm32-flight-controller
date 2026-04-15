@@ -53,8 +53,8 @@ int main(void) {
     }
     UART_Print("Sensors OK!\r\n");
 
-    PIDConfig pitchConfig = {2.0f, 0.0f, 0.5f, -400.0f, 400.0f};
-    PIDConfig rollConfig  = {2.0f, 0.0f, 0.5f, -400.0f, 400.0f};
+    PIDConfig pitchConfig = {2.0f, 0.0f, 0.5f, -400.0f, 400.0f, 100.0f};
+    PIDConfig rollConfig  = {2.0f, 0.0f, 0.5f, -400.0f, 400.0f, 100.0f};
 
     PIDController pidPitch(pitchConfig);
     PIDController pidRoll(rollConfig);

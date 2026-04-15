@@ -8,6 +8,7 @@ namespace Core {
         float kd;
         float minOutput;
         float maxOutput;
+        float maxIntegral;
     };
 
     class PIDController {
@@ -23,6 +24,13 @@ namespace Core {
             float pTerm = config.kp * error;
 
             integral += error * dt;
+
+            if (integral > config.maxIntegral) {
+                integral = config.maxIntegral;
+            } else if (integral < config.maxIntegral) {
+                integral = -config.maxIntegral;
+            }
+            
             float iTerm = config.ki * integral;
 
             float derivative = (error - prevError) / dt;
