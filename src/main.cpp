@@ -9,6 +9,8 @@
 #include "hal/pwm_driver.h"
 #include "hal/IBusReceiver.h"
 
+#include <math.h>
+
 #include <stdio.h>
 
 using namespace HAL;
@@ -65,6 +67,10 @@ void simulateIBUS(HAL::IBusReceiver& rx, uint16_t throttle, uint16_t pitch) {
     }
 }
 
+float mapFloat(float x, float in_min, float in_max, float out_min, float out_max) {
+    return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+}
+
 int main(void) {
     HAL_Init();
     SystemClock_Config();
@@ -98,7 +104,6 @@ int main(void) {
     PIDController pidPitch(pitchConfig);
     PIDController pidRoll(rollConfig);
 
-    char buffer[128];
     uint32_t lastLoopTime = HAL_GetTick();
 
     UART_Print("Starting Flight Loop...\r\n");
@@ -111,36 +116,36 @@ int main(void) {
         uint32_t currentTime = HAL_GetTick();
         float dt = (currentTime - lastLoopTime) / 1000.0f;
         lastLoopTime = currentTime;
-        
         if (dt <= 0.001f) dt = 0.001f; 
 
-        gyro.update();
-        IMUData data = gyro.getData();
-
-        float pitchCorrection = pidPitch.calculate(0.0f, data.pitch, dt);
-        float rollCorrection  = pidRoll.calculate(0.0f, data.roll, dt);
-
         uint16_t fakeThrottle = 1000 + (HAL_GetTick() % 2000) / 4; 
-        uint16_t fakePitch = 1500;
-
+        uint16_t fakePitch = 1500 + 500 * sin(HAL_GetTick() / 500.0f); 
         simulateIBUS(receiver, fakeThrottle, fakePitch);
+
         Core::ReceiverData rcData = receiver.getRCData();
 
         if (!receiver.isConnected()) {
             rcData.throttle = 1000; 
         }
+
+        gyro.update();
+        IMUData data = gyro.getData();
+
+        float targetPitch = mapFloat(rcData.pitch, 1000.0f, 2000.0f, -30.0f, 30.0f);
+        float targetRoll  = mapFloat(rcData.roll,  1000.0f, 2000.0f, -30.0f, 30.0f);
+
+        float pitchCorrection = pidPitch.calculate(targetPitch, data.pitch, dt);
+        float rollCorrection  = pidRoll.calculate(targetRoll,  data.roll, dt);
+
         uint16_t baseThrottle = rcData.throttle;
-
         MotorSpeeds speeds = MotorMixer::mix(baseThrottle, pitchCorrection, rollCorrection);
-
         pwm.setMotorSpeeds(speeds.frontLeft, speeds.frontRight, speeds.rearLeft, speeds.rearRight);
 
-        snprintf(buffer, sizeof(buffer), 
-                 "P: %3d R: %3d || M1: %d | M2: %d | M3: %d | M4: %d\r\n",
-                 (int)data.pitch, (int)data.roll,
-                 speeds.frontLeft, speeds.frontRight, speeds.rearLeft, speeds.rearRight);
+        char msg[120];
+        sprintf(msg, "Pitch: %d -> %.1f deg || PitCorr: %.1f || M1(Front): %d | M3(Rear): %d\r\n", 
+                rcData.pitch, targetPitch, pitchCorrection, speeds.frontLeft, speeds.rearLeft);
+        UART_Print(msg);
         
-        UART_Print(buffer);
         HAL_Delay(20); 
     }
 }
