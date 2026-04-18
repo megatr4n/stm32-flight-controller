@@ -7,6 +7,7 @@
 #include "core/controllers/MotorMixer.h"
 
 #include "hal/pwm_driver.h"
+#include "hal/IBusReceiver.h"
 
 #include <stdio.h>
 
@@ -33,6 +34,35 @@ static void SystemClock_Config(void) {
     RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
     RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
     HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2);
+}
+
+void simulateIBUS(HAL::IBusReceiver& rx, uint16_t throttle, uint16_t pitch) {
+    uint8_t packet[32] = {0};
+    packet[0] = 0x20; 
+    packet[1] = 0x40; 
+
+    packet[2] = 1500 & 0xFF; 
+    packet[3] = (1500 >> 8) & 0xFF;
+    packet[4] = pitch & 0xFF; 
+    packet[5] = (pitch >> 8) & 0xFF;
+    packet[6] = throttle & 0xFF; 
+    packet[7] = (throttle >> 8) & 0xFF;
+    packet[8] = 1500 & 0xFF; 
+    packet[9] = (1500 >> 8) & 0xFF;
+
+    for(int i = 10; i < 30; i += 2) {
+        packet[i] = 1500 & 0xFF;
+        packet[i+1] = (1500 >> 8) & 0xFF;
+    }
+    uint16_t checksum = 0xFFFF;
+    for (int i = 0; i < 30; i++) {
+        checksum -= packet[i];
+    }
+    packet[30] = checksum & 0xFF;
+    packet[31] = (checksum >> 8) & 0xFF;
+    for (int i = 0; i < 32; i++) {
+        rx.feedByte(packet[i]);
+    }
 }
 
 int main(void) {
@@ -73,6 +103,10 @@ int main(void) {
 
     UART_Print("Starting Flight Loop...\r\n");
 
+    HAL::IBusReceiver receiver;
+    receiver.init();
+    UART_Print("Receiver Initialized!\r\n");
+
     while (1) {
         uint32_t currentTime = HAL_GetTick();
         float dt = (currentTime - lastLoopTime) / 1000.0f;
@@ -86,7 +120,17 @@ int main(void) {
         float pitchCorrection = pidPitch.calculate(0.0f, data.pitch, dt);
         float rollCorrection  = pidRoll.calculate(0.0f, data.roll, dt);
 
-        uint16_t baseThrottle = 1300; 
+        uint16_t fakeThrottle = 1000 + (HAL_GetTick() % 2000) / 4; 
+        uint16_t fakePitch = 1500;
+
+        simulateIBUS(receiver, fakeThrottle, fakePitch);
+        Core::ReceiverData rcData = receiver.getRCData();
+
+        if (!receiver.isConnected()) {
+            rcData.throttle = 1000; 
+        }
+        uint16_t baseThrottle = rcData.throttle;
+
         MotorSpeeds speeds = MotorMixer::mix(baseThrottle, pitchCorrection, rollCorrection);
 
         pwm.setMotorSpeeds(speeds.frontLeft, speeds.frontRight, speeds.rearLeft, speeds.rearRight);
