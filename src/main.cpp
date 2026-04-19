@@ -10,7 +10,6 @@
 #include "hal/IBusReceiver.h"
 
 #include <math.h>
-
 #include <stdio.h>
 
 using namespace HAL;
@@ -107,60 +106,63 @@ int main(void) {
     PIDController pidPitch(pitchConfig);
     PIDController pidRoll(rollConfig);
 
-    uint32_t lastLoopTime = HAL_GetTick();
-
-    UART_Print("Starting Flight Loop...\r\n");
-
     HAL::IBusReceiver receiver;
     receiver.init();
     UART_Print("Receiver Initialized!\r\n");
+    UART_Print("Starting Flight Loop...\r\n");
+
+    uint32_t lastLoopTime = HAL_GetTick();
+    uint32_t lastPrintTime = HAL_GetTick();
 
     while (1) {
         uint32_t currentTime = HAL_GetTick();
-        float dt = (currentTime - lastLoopTime) / 1000.0f;
-        lastLoopTime = currentTime;
-        if (dt <= 0.001f) dt = 0.001f; 
+        if (currentTime - lastLoopTime >= 2) {
+            float dt = (currentTime - lastLoopTime) / 1000.0f;
+            lastLoopTime = currentTime; 
+            if (dt <= 0.001f) dt = 0.001f; 
 
-        uint16_t fakeThrottle = 1000 + (HAL_GetTick() % 2000) / 4; 
-        uint16_t fakePitch = 1500 + 500 * sin(HAL_GetTick() / 500.0f); 
-        uint16_t fakeAux1 = ((HAL_GetTick() / 1500) % 2 == 0) ? 1000 : 2000;
-        simulateIBUS(receiver, fakeThrottle, fakePitch, fakeAux1);
+            uint16_t fakeThrottle = 1000 + (currentTime % 2000) / 4; 
+            uint16_t fakePitch = 1500 + 500 * sin(currentTime / 500.0f); 
+            uint16_t fakeAux1 = ((currentTime / 1500) % 2 == 0) ? 1000 : 2000;
+            simulateIBUS(receiver, fakeThrottle, fakePitch, fakeAux1);
 
-        Core::ReceiverData rcData = receiver.getRCData();
+            Core::ReceiverData rcData = receiver.getRCData();
 
-        if (!receiver.isConnected()) {
-            rcData.throttle = 1000; 
+            if (!receiver.isConnected()) {
+                rcData.throttle = 1000; 
+            }
+
+            gyro.update();
+            IMUData data = gyro.getData();
+
+            float targetPitch = mapFloat(rcData.pitch, 1000.0f, 2000.0f, -30.0f, 30.0f);
+            float targetRoll  = mapFloat(rcData.roll,  1000.0f, 2000.0f, -30.0f, 30.0f);
+
+            float pitchCorrection = pidPitch.calculate(targetPitch, data.pitch, dt);
+            float rollCorrection  = pidRoll.calculate(targetRoll,  data.roll, dt);
+
+            bool isArmed = (rcData.aux1 > 1500);
+            uint16_t baseThrottle = 1000;
+            MotorSpeeds speeds = {1000, 1000, 1000, 1000};
+            
+            if (isArmed) {
+                baseThrottle = rcData.throttle;
+                speeds = MotorMixer::mix(baseThrottle, pitchCorrection, rollCorrection);
+            } else {
+                pidPitch.reset();
+                pidRoll.reset();
+            }
+
+            pwm.setMotorSpeeds(speeds.frontLeft, speeds.frontRight, speeds.rearLeft, speeds.rearRight);
+
+            if (currentTime - lastPrintTime >= 100) {
+                char msg[120];
+                sprintf(msg, "ARM: %d | Thr: %d | Pit: %d || M1: %d | M3: %d\r\n", 
+                        isArmed, rcData.throttle, rcData.pitch, speeds.frontLeft, speeds.rearLeft);
+                UART_Print(msg);
+                lastPrintTime = currentTime; 
+            }
         }
-
-        gyro.update();
-        IMUData data = gyro.getData();
-
-        float targetPitch = mapFloat(rcData.pitch, 1000.0f, 2000.0f, -30.0f, 30.0f);
-        float targetRoll  = mapFloat(rcData.roll,  1000.0f, 2000.0f, -30.0f, 30.0f);
-
-        float pitchCorrection = pidPitch.calculate(targetPitch, data.pitch, dt);
-        float rollCorrection  = pidRoll.calculate(targetRoll,  data.roll, dt);
-
-        bool isArmed = (rcData.aux1 > 1500);
-
-        uint16_t baseThrottle = 1000;
-        MotorSpeeds speeds = {1000, 1000, 1000, 1000};
-        if (isArmed) {
-            baseThrottle = rcData.throttle;
-            speeds = MotorMixer::mix(baseThrottle, pitchCorrection, rollCorrection);
-        } else {
-            pidPitch.reset();
-            pidRoll.reset();
-        }
-
-        pwm.setMotorSpeeds(speeds.frontLeft, speeds.frontRight, speeds.rearLeft, speeds.rearRight);
-
-        char msg[120];
-        sprintf(msg, "ARM: %d | Thr: %d | Pit: %d || M1: %d | M3: %d\r\n", 
-                isArmed, rcData.throttle, rcData.pitch, speeds.frontLeft, speeds.rearLeft);
-        UART_Print(msg);
-        
-        HAL_Delay(20); 
     }
 }
 
