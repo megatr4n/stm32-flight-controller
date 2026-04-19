@@ -38,7 +38,7 @@ static void SystemClock_Config(void) {
     HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2);
 }
 
-void simulateIBUS(HAL::IBusReceiver& rx, uint16_t throttle, uint16_t pitch) {
+void simulateIBUS(HAL::IBusReceiver& rx, uint16_t throttle, uint16_t pitch, uint16_t aux1) {
     uint8_t packet[32] = {0};
     packet[0] = 0x20; 
     packet[1] = 0x40; 
@@ -52,7 +52,10 @@ void simulateIBUS(HAL::IBusReceiver& rx, uint16_t throttle, uint16_t pitch) {
     packet[8] = 1500 & 0xFF; 
     packet[9] = (1500 >> 8) & 0xFF;
 
-    for(int i = 10; i < 30; i += 2) {
+    packet[10] = aux1 & 0xFF; 
+    packet[11] = (aux1 >> 8) & 0xFF;
+
+    for(int i = 12; i < 30; i += 2) {
         packet[i] = 1500 & 0xFF;
         packet[i+1] = (1500 >> 8) & 0xFF;
     }
@@ -120,7 +123,8 @@ int main(void) {
 
         uint16_t fakeThrottle = 1000 + (HAL_GetTick() % 2000) / 4; 
         uint16_t fakePitch = 1500 + 500 * sin(HAL_GetTick() / 500.0f); 
-        simulateIBUS(receiver, fakeThrottle, fakePitch);
+        uint16_t fakeAux1 = ((HAL_GetTick() / 1500) % 2 == 0) ? 1000 : 2000;
+        simulateIBUS(receiver, fakeThrottle, fakePitch, fakeAux1);
 
         Core::ReceiverData rcData = receiver.getRCData();
 
@@ -137,13 +141,23 @@ int main(void) {
         float pitchCorrection = pidPitch.calculate(targetPitch, data.pitch, dt);
         float rollCorrection  = pidRoll.calculate(targetRoll,  data.roll, dt);
 
-        uint16_t baseThrottle = rcData.throttle;
-        MotorSpeeds speeds = MotorMixer::mix(baseThrottle, pitchCorrection, rollCorrection);
+        bool isArmed = (rcData.aux1 > 1500);
+
+        uint16_t baseThrottle = 1000;
+        MotorSpeeds speeds = {1000, 1000, 1000, 1000};
+        if (isArmed) {
+            baseThrottle = rcData.throttle;
+            speeds = MotorMixer::mix(baseThrottle, pitchCorrection, rollCorrection);
+        } else {
+            pidPitch.reset();
+            pidRoll.reset();
+        }
+
         pwm.setMotorSpeeds(speeds.frontLeft, speeds.frontRight, speeds.rearLeft, speeds.rearRight);
 
         char msg[120];
-        sprintf(msg, "Pitch: %d -> %.1f deg || PitCorr: %.1f || M1(Front): %d | M3(Rear): %d\r\n", 
-                rcData.pitch, targetPitch, pitchCorrection, speeds.frontLeft, speeds.rearLeft);
+        sprintf(msg, "ARM: %d | Thr: %d | Pit: %d || M1: %d | M3: %d\r\n", 
+                isArmed, rcData.throttle, rcData.pitch, speeds.frontLeft, speeds.rearLeft);
         UART_Print(msg);
         
         HAL_Delay(20); 
