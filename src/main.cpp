@@ -102,9 +102,11 @@ int main(void) {
 
     PIDConfig pitchConfig = {2.0f, 0.0f, 0.5f, -400.0f, 400.0f, 100.0f};
     PIDConfig rollConfig  = {2.0f, 0.0f, 0.5f, -400.0f, 400.0f, 100.0f};
+    PIDConfig yawConfig   = {3.0f, 0.0f, 0.0f, -400.0f, 400.0f, 100.0f};
 
     PIDController pidPitch(pitchConfig);
     PIDController pidRoll(rollConfig);
+    PIDController pidYaw(yawConfig);
 
     HAL::IBusReceiver receiver;
     receiver.init();
@@ -137,9 +139,11 @@ int main(void) {
 
             float targetPitch = mapFloat(rcData.pitch, 1000.0f, 2000.0f, -30.0f, 30.0f);
             float targetRoll  = mapFloat(rcData.roll,  1000.0f, 2000.0f, -30.0f, 30.0f);
+            float targetYaw   = mapFloat(rcData.yaw,   1000.0f, 2000.0f, -90.0f, 90.0f);
 
             float pitchCorrection = pidPitch.calculate(targetPitch, data.pitch, dt);
-            float rollCorrection  = pidRoll.calculate(targetRoll,  data.roll, dt);
+            float rollCorrection  = pidRoll.calculate(targetRoll, data.roll, dt);
+            float yawCorrection   = pidYaw.calculate(targetYaw, data.gyro.z, dt);
 
             bool isArmed = (rcData.aux1 > 1500);
             uint16_t baseThrottle = 1000;
@@ -147,10 +151,11 @@ int main(void) {
             
             if (isArmed) {
                 baseThrottle = rcData.throttle;
-                speeds = MotorMixer::mix(baseThrottle, pitchCorrection, rollCorrection);
+                speeds = MotorMixer::mix(baseThrottle, pitchCorrection, rollCorrection, yawCorrection);
             } else {
                 pidPitch.reset();
                 pidRoll.reset();
+                pidYaw.reset();
             }
 
             pwm.setMotorSpeeds(speeds.frontLeft, speeds.frontRight, speeds.rearLeft, speeds.rearRight);

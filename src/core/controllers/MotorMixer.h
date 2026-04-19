@@ -23,13 +23,13 @@ namespace Core {
         }
 
     public:
-        static MotorSpeeds mix(uint16_t baseThrottle, float pidPitch, float pidRoll) {
+        static MotorSpeeds mix(uint16_t baseThrottle, float pidPitch, float pidRoll, float pidYaw) {
             MotorSpeeds speeds;
 
-            float fl = baseThrottle + pidPitch + pidRoll;
-            float fr = baseThrottle + pidPitch - pidRoll;
-            float rl = baseThrottle - pidPitch + pidRoll;
-            float rr = baseThrottle - pidPitch - pidRoll;
+            float fl = baseThrottle + pidPitch + pidRoll - pidYaw;
+            float fr = baseThrottle + pidPitch - pidRoll + pidYaw;
+            float rl = baseThrottle - pidPitch + pidRoll + pidYaw;
+            float rr = baseThrottle - pidPitch - pidRoll - pidYaw;
 
             speeds.frontLeft = constrain(fl);
             speeds.frontRight = constrain(fr);
