@@ -9,6 +9,9 @@
 #include "hal/pwm_driver.h"
 #include "hal/IBusReceiver.h"
 
+#include "core/filters/LowPassFilter.h"
+#include "hal/timing.h"
+
 #include <math.h>
 #include <stdio.h>
 
@@ -37,41 +40,12 @@ static void SystemClock_Config(void) {
     HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2);
 }
 
-void simulateIBUS(HAL::IBusReceiver& rx, uint16_t throttle, uint16_t pitch, uint16_t aux1) {
-    uint8_t packet[32] = {0};
-    packet[0] = 0x20; 
-    packet[1] = 0x40; 
-
-    packet[2] = 1500 & 0xFF; 
-    packet[3] = (1500 >> 8) & 0xFF;
-    packet[4] = pitch & 0xFF; 
-    packet[5] = (pitch >> 8) & 0xFF;
-    packet[6] = throttle & 0xFF; 
-    packet[7] = (throttle >> 8) & 0xFF;
-    packet[8] = 1500 & 0xFF; 
-    packet[9] = (1500 >> 8) & 0xFF;
-
-    packet[10] = aux1 & 0xFF; 
-    packet[11] = (aux1 >> 8) & 0xFF;
-
-    for(int i = 12; i < 30; i += 2) {
-        packet[i] = 1500 & 0xFF;
-        packet[i+1] = (1500 >> 8) & 0xFF;
-    }
-    uint16_t checksum = 0xFFFF;
-    for (int i = 0; i < 30; i++) {
-        checksum -= packet[i];
-    }
-    packet[30] = checksum & 0xFF;
-    packet[31] = (checksum >> 8) & 0xFF;
-    for (int i = 0; i < 32; i++) {
-        rx.feedByte(packet[i]);
-    }
-}
-
 float mapFloat(float x, float in_min, float in_max, float out_min, float out_max) {
     return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
+
+uint8_t rx_buffer[64];
+uint16_t rx_tail = 0;
 
 int main(void) {
     HAL_Init();
@@ -108,25 +82,38 @@ int main(void) {
     PIDController pidRoll(rollConfig);
     PIDController pidYaw(yawConfig);
 
+    LowPassFilter filterPitch(0.15f);
+    LowPassFilter filterRoll(0.15f);
+    LowPassFilter filterYaw(0.15f);
+
     HAL::IBusReceiver receiver;
     receiver.init();
+
+    UART1_Start_DMA_RX(rx_buffer, 64);
+
     UART_Print("Receiver Initialized!\r\n");
     UART_Print("Starting Flight Loop...\r\n");
 
-    uint32_t lastLoopTime = HAL_GetTick();
-    uint32_t lastPrintTime = HAL_GetTick();
+    HAL::Timing::init();
+
+    uint32_t lastLoopTimeUs = HAL::Timing::getMicros();
+    uint32_t lastPrintTimeMs = HAL_GetTick();
 
     while (1) {
-        uint32_t currentTime = HAL_GetTick();
-        if (currentTime - lastLoopTime >= 2) {
-            float dt = (currentTime - lastLoopTime) / 1000.0f;
-            lastLoopTime = currentTime; 
-            if (dt <= 0.001f) dt = 0.001f; 
+        uint32_t currentTimeUs = HAL::Timing::getMicros();
+        
+        if (currentTimeUs - lastLoopTimeUs >= 2000) {
+            
+            float dt = (currentTimeUs - lastLoopTimeUs) / 1000000.0f;
+            lastLoopTimeUs = currentTimeUs; 
+            
+            if (dt <= 0.001f || dt > 0.05f) dt = 0.002f; 
 
-            uint16_t fakeThrottle = 1000 + (currentTime % 2000) / 4; 
-            uint16_t fakePitch = 1500 + 500 * sin(currentTime / 500.0f); 
-            uint16_t fakeAux1 = ((currentTime / 1500) % 2 == 0) ? 1000 : 2000;
-            simulateIBUS(receiver, fakeThrottle, fakePitch, fakeAux1);
+            uint16_t rx_head = 64 - __HAL_DMA_GET_COUNTER(&HAL::hdma_usart1_rx);
+            while (rx_tail != rx_head) {
+                receiver.feedByte(rx_buffer[rx_tail]);
+                rx_tail = (rx_tail + 1) % 64;
+            }
 
             Core::ReceiverData rcData = receiver.getRCData();
 
@@ -137,13 +124,17 @@ int main(void) {
             gyro.update();
             IMUData data = gyro.getData();
 
+            float cleanPitch = filterPitch.apply(data.pitch);
+            float cleanRoll  = filterRoll.apply(data.roll);
+            float cleanYaw   = filterYaw.apply(data.gyro.z);
+
             float targetPitch = mapFloat(rcData.pitch, 1000.0f, 2000.0f, -30.0f, 30.0f);
             float targetRoll  = mapFloat(rcData.roll,  1000.0f, 2000.0f, -30.0f, 30.0f);
             float targetYaw   = mapFloat(rcData.yaw,   1000.0f, 2000.0f, -90.0f, 90.0f);
 
-            float pitchCorrection = pidPitch.calculate(targetPitch, data.pitch, dt);
-            float rollCorrection  = pidRoll.calculate(targetRoll, data.roll, dt);
-            float yawCorrection   = pidYaw.calculate(targetYaw, data.gyro.z, dt);
+            float pitchCorrection = pidPitch.calculate(targetPitch, cleanPitch, dt);
+            float rollCorrection  = pidRoll.calculate(targetRoll, cleanRoll, dt);
+            float yawCorrection   = pidYaw.calculate(targetYaw, cleanYaw, dt);
 
             bool isArmed = (rcData.aux1 > 1500);
             uint16_t baseThrottle = 1000;
@@ -156,16 +147,21 @@ int main(void) {
                 pidPitch.reset();
                 pidRoll.reset();
                 pidYaw.reset();
+
+                filterPitch.reset();
+                filterRoll.reset();
+                filterYaw.reset();
             }
 
             pwm.setMotorSpeeds(speeds.frontLeft, speeds.frontRight, speeds.rearLeft, speeds.rearRight);
 
-            if (currentTime - lastPrintTime >= 100) {
+            uint32_t currentTimeMs = HAL_GetTick();
+            if (currentTimeMs - lastPrintTimeMs >= 100) {
                 char msg[120];
                 sprintf(msg, "ARM: %d | Thr: %d | Pit: %d || M1: %d | M3: %d\r\n", 
                         isArmed, rcData.throttle, rcData.pitch, speeds.frontLeft, speeds.rearLeft);
                 UART_Print(msg);
-                lastPrintTime = currentTime; 
+                lastPrintTimeMs = currentTimeMs; 
             }
         }
     }
