@@ -12,6 +12,8 @@
 #include "core/filters/LowPassFilter.h"
 #include "hal/timing.h"
 
+#include "core/controllers/SystemState.h"
+
 #include <math.h>
 #include <stdio.h>
 
@@ -54,6 +56,8 @@ int main(void) {
     
     UART_Print("\r\nFlight Controller Starting!\r\n");
 
+    Core::SystemStateMachine stateMachine;
+
     STM32_I2C i2cBus;
     if (!i2cBus.init()) {
         UART_Print("ERROR: I2C Failed!\r\n");
@@ -66,6 +70,8 @@ int main(void) {
         while (1);
     }
     UART_Print("Sensors OK!\r\n");
+
+    stateMachine.notifyInitComplete();
 
     PWMDriver pwm;
     if (!pwm.init()) {
@@ -88,10 +94,9 @@ int main(void) {
 
     HAL::IBusReceiver receiver;
     receiver.init();
-
     UART1_Start_DMA_RX(rx_buffer, 64);
-
     UART_Print("Receiver Initialized!\r\n");
+
     UART_Print("Starting Flight Loop...\r\n");
 
     HAL::Timing::init();
@@ -117,9 +122,8 @@ int main(void) {
 
             Core::ReceiverData rcData = receiver.getRCData();
 
-            if (!receiver.isConnected()) {
-                rcData.throttle = 1000; 
-            }
+            bool armSwitch = (rcData.aux1 > 1500);
+            stateMachine.update(receiver.isConnected(), armSwitch, rcData.throttle);
 
             gyro.update();
             IMUData data = gyro.getData();
@@ -136,11 +140,10 @@ int main(void) {
             float rollCorrection  = pidRoll.calculate(targetRoll, cleanRoll, dt);
             float yawCorrection   = pidYaw.calculate(targetYaw, cleanYaw, dt);
 
-            bool isArmed = (rcData.aux1 > 1500);
             uint16_t baseThrottle = 1000;
             MotorSpeeds speeds = {1000, 1000, 1000, 1000};
             
-            if (isArmed) {
+            if (stateMachine.areMotorsAllowed()) {
                 baseThrottle = rcData.throttle;
                 speeds = MotorMixer::mix(baseThrottle, pitchCorrection, rollCorrection, yawCorrection);
             } else {
@@ -157,9 +160,9 @@ int main(void) {
 
             uint32_t currentTimeMs = HAL_GetTick();
             if (currentTimeMs - lastPrintTimeMs >= 100) {
-                char msg[120];
-                sprintf(msg, "ARM: %d | Thr: %d | Pit: %d || M1: %d | M3: %d\r\n", 
-                        isArmed, rcData.throttle, rcData.pitch, speeds.frontLeft, speeds.rearLeft);
+                char msg[140];
+                sprintf(msg, "STATE: %d | Thr: %d | Pit: %d || M1: %d | M3: %d\r\n", 
+                        static_cast<int>(stateMachine.getState()), rcData.throttle, (int)cleanPitch, speeds.frontLeft, speeds.rearLeft);
                 UART_Print(msg);
                 lastPrintTimeMs = currentTimeMs; 
             }
