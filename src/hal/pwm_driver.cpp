@@ -21,9 +21,12 @@ namespace HAL {
         HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
         htim2.Instance = TIM2;
-        htim2.Init.Prescaler = 72 - 1;
+
+        
+
+        htim2.Init.Prescaler = (72 / 8) - 1;
         htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
-        htim2.Init.Period = 20000 - 1;
+        htim2.Init.Period = 16000 - 1;
         htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
         htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
 
