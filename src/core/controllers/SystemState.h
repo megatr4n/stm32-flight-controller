@@ -5,6 +5,7 @@ namespace Core {
 
     enum class FlightState {
         INIT,
+        ESC_CALIBRATION,
         DISARMED,
         ARMING_CHECK,
         ARMED,
@@ -17,12 +18,20 @@ namespace Core {
         
         public:
             void update(bool isRcConnected, bool isArmSwitchOn, uint16_t throttle) {
-                if (!isRcConnected && currentState != FlightState::INIT) {
+                if (!isRcConnected && currentState != FlightState::INIT && currentState != FlightState::ESC_CALIBRATION) {
                     currentState = FlightState::FAILSAFE;
                     return;
                 }
+                
                 switch (currentState) {
                     case FlightState::INIT:
+                        break;
+
+
+                    case FlightState::ESC_CALIBRATION:
+                    if (!isArmSwitchOn) {
+                        currentState = FlightState::DISARMED;
+                    }
                         break;
 
                     case FlightState::DISARMED:
@@ -54,9 +63,13 @@ namespace Core {
                     break;
             }
     }
-            void notifyInitComplete() {
+            void notifyInitComplete(bool shouldCalibrate) {
                 if (currentState == FlightState::INIT) {
-                    currentState = FlightState::DISARMED;
+                    if (shouldCalibrate) {
+                        currentState = FlightState::ESC_CALIBRATION;
+                    } else {
+                        currentState = FlightState::DISARMED;
+                    }
                 }
             }
 
@@ -66,6 +79,10 @@ namespace Core {
 
             bool areMotorsAllowed() const {
                 return currentState == FlightState::ARMED;
+            }
+
+            bool isCalibratingESC() const {
+                return currentState == FlightState::ESC_CALIBRATION;
             }
         };
 }

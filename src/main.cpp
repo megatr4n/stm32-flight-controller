@@ -71,8 +71,6 @@ int main(void) {
     }
     UART_Print("Sensors OK!\r\n");
 
-    stateMachine.notifyInitComplete();
-
     PWMDriver pwm;
     if (!pwm.init()) {
         UART_Print("ERROR: PWM Timers Failed!\r\n");
@@ -97,9 +95,34 @@ int main(void) {
     UART1_Start_DMA_RX(rx_buffer, 64);
     UART_Print("Receiver Initialized!\r\n");
 
-    UART_Print("Starting Flight Loop...\r\n");
-
+    UART_Print("Waiting for RC Link...\r\n");
     HAL::Timing::init();
+
+    uint32_t bootStartTime = HAL::Timing::getMicros();
+    bool calibrationRequested = false;
+
+    while (HAL::Timing::getMicros() - bootStartTime < 100000) {
+        uint16_t rx_head = 64 - __HAL_DMA_GET_COUNTER(&HAL::hdma_usart1_rx);
+        while (rx_tail != rx_head) {
+            receiver.feedByte(rx_buffer[rx_tail]);
+            rx_tail = (rx_tail + 1) % 64;
+        }
+
+        if (receiver.isConnected()) {
+            Core::ReceiverData bootRcData = receiver.getRCData();
+            calibrationRequested = (bootRcData.throttle > 1900 && bootRcData.aux1 > 1500);
+            UART_Print("RC Link Established!\r\n");
+            break; 
+        }
+    }
+
+    stateMachine.notifyInitComplete(calibrationRequested);
+
+    if (calibrationRequested) {
+        UART_Print("!!! ESC CALIBRATION MODE ACTIVATED !!!\r\n");
+    } else {
+        UART_Print("Starting Flight Loop...\r\n");
+    }
 
     uint32_t lastLoopTimeUs = HAL::Timing::getMicros();
     uint32_t lastPrintTimeMs = HAL_GetTick();
@@ -146,7 +169,14 @@ int main(void) {
             if (stateMachine.areMotorsAllowed()) {
                 baseThrottle = rcData.throttle;
                 speeds = MotorMixer::mix(baseThrottle, pitchCorrection, rollCorrection, yawCorrection);
-            } else {
+            } 
+            else if (stateMachine.isCalibratingESC()) {
+                speeds.frontLeft  = rcData.throttle;
+                speeds.frontRight = rcData.throttle;
+                speeds.rearLeft   = rcData.throttle;
+                speeds.rearRight  = rcData.throttle;
+            } 
+            else {
                 pidPitch.reset();
                 pidRoll.reset();
                 pidYaw.reset();
