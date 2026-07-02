@@ -110,37 +110,48 @@ UART_Print(dbg);
 
 bool calibrationRequested = false;
 
-#ifdef WOKWI_SIMULATION
-    UART_Print("RC Link Bypassed at Boot!\r\n");
-#else
-    uint32_t bootStartTime = HAL::Timing::getMicros();
-    
-    while (HAL::Timing::getMicros() - bootStartTime < 100000) {
-        uint16_t rx_head = 64 - __HAL_DMA_GET_COUNTER(&HAL::hdma_usart1_rx);
-        while (rx_tail != rx_head) {
-            receiver.feedByte(rx_buffer[rx_tail]);
-            rx_tail = (rx_tail + 1) % 64;
-        }
-
-        if (receiver.isConnected()) {
-            Core::ReceiverData bootRcData = receiver.getRCData();
-            calibrationRequested = (bootRcData.throttle > 1900 && bootRcData.aux1 > 1500);
-            UART_Print("RC Link Established!\r\n");
-            break; 
-        }
-    }
+#ifndef WOKWI_SIMULATION
+            uint16_t rx_head = 64 - __HAL_DMA_GET_COUNTER(&HAL::hdma_usart1_rx);
+            while (rx_tail != rx_head) {
+                receiver.feedByte(rx_buffer[rx_tail]);
+                rx_tail = (rx_tail + 1) % 64;
+            }
 #endif
 
-    stateMachine.notifyInitComplete(calibrationRequested);
+            Core::ReceiverData rcData = receiver.getRCData();
+            bool is_connected = receiver.isConnected();
 
-    if (calibrationRequested) {
-        UART_Print("!!! ESC CALIBRATION MODE ACTIVATED !!!\r\n");
-    } else {
-        UART_Print("Starting Flight Loop...\r\n");
-    }
+        #ifdef WOKWI_SIMULATION
+                is_connected = true;       
+                rcData.pitch = 1500;      
+                rcData.roll = 1500;
+                rcData.yaw = 1500;
+                rcData.aux1 = 2000; 
+                static bool isSimArmed = false;
+            if (stateMachine.areMotorsAllowed()) {
+                isSimArmed = true;
+            }
 
-    uint32_t lastLoopTimeUs = HAL::Timing::getMicros();
-    uint32_t lastPrintTimeMs = HAL_GetTick();
+            if (!isSimArmed) {
+                rcData.throttle = 1000;
+            } else {
+                rcData.throttle = 1300;
+            }
+        #endif
+
+            bool armSwitch = (rcData.aux1 > 1500);
+            stateMachine.update(is_connected, armSwitch, rcData.throttle);
+
+        stateMachine.notifyInitComplete(calibrationRequested);
+
+        if (calibrationRequested) {
+            UART_Print("!!! ESC CALIBRATION MODE ACTIVATED !!!\r\n");
+        } else {
+            UART_Print("Starting Flight Loop...\r\n");
+        }
+
+        uint32_t lastLoopTimeUs = HAL::Timing::getMicros();
+        uint32_t lastPrintTimeMs = HAL_GetTick();
 
     while (1) {
         uint32_t currentTimeUs = HAL::Timing::getMicros();
