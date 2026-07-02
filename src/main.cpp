@@ -1,3 +1,5 @@
+#define WOKWI_SIMULATION 1
+
 #include "stm32f1xx_hal.h"
 #include "hal/STM32_I2C.h"
 #include "hal/uart_driver.h"
@@ -16,6 +18,7 @@
 
 #include <math.h>
 #include <stdio.h>
+
 
 using namespace HAL;
 using namespace Devices;
@@ -98,9 +101,20 @@ int main(void) {
     UART_Print("Waiting for RC Link...\r\n");
     HAL::Timing::init();
 
-    uint32_t bootStartTime = HAL::Timing::getMicros();
-    bool calibrationRequested = false;
+    char dbg[64];
+sprintf(dbg, "Micros A: %lu\r\n", HAL::Timing::getMicros());
+UART_Print(dbg);
+HAL_Delay(50);
+sprintf(dbg, "Micros B: %lu\r\n", HAL::Timing::getMicros());
+UART_Print(dbg);
 
+bool calibrationRequested = false;
+
+#ifdef WOKWI_SIMULATION
+    UART_Print("RC Link Bypassed at Boot!\r\n");
+#else
+    uint32_t bootStartTime = HAL::Timing::getMicros();
+    
     while (HAL::Timing::getMicros() - bootStartTime < 100000) {
         uint16_t rx_head = 64 - __HAL_DMA_GET_COUNTER(&HAL::hdma_usart1_rx);
         while (rx_tail != rx_head) {
@@ -115,6 +129,7 @@ int main(void) {
             break; 
         }
     }
+#endif
 
     stateMachine.notifyInitComplete(calibrationRequested);
 
@@ -137,16 +152,37 @@ int main(void) {
             
             if (dt <= 0.001f || dt > 0.05f) dt = 0.002f; 
 
+            #ifndef WOKWI_SIMULATION
             uint16_t rx_head = 64 - __HAL_DMA_GET_COUNTER(&HAL::hdma_usart1_rx);
             while (rx_tail != rx_head) {
                 receiver.feedByte(rx_buffer[rx_tail]);
                 rx_tail = (rx_tail + 1) % 64;
             }
+            #endif
 
             Core::ReceiverData rcData = receiver.getRCData();
+            bool is_connected = receiver.isConnected();
+
+            #ifdef WOKWI_SIMULATION
+                is_connected = true;       
+                rcData.throttle = 1300;    
+                rcData.aux1 = 2000;       
+                rcData.pitch = 1500;      
+                rcData.roll = 1500;
+                rcData.yaw = 1500;
+            #endif
+
+            #ifdef WOKWI_SIMULATION
+                is_connected = true;       
+                rcData.throttle = 1300;    
+                rcData.aux1 = 2000;       
+                rcData.pitch = 1500;      
+                rcData.roll = 1500;
+                rcData.yaw = 1500;
+            #endif
 
             bool armSwitch = (rcData.aux1 > 1500);
-            stateMachine.update(receiver.isConnected(), armSwitch, rcData.throttle);
+            stateMachine.update(is_connected, armSwitch, rcData.throttle);
 
             gyro.update();
             IMUData data = gyro.getData();
@@ -184,6 +220,14 @@ int main(void) {
                 filterPitch.reset();
                 filterRoll.reset();
                 filterYaw.reset();
+            }
+
+            if (!stateMachine.areMotorsAllowed()) {
+                static uint32_t lastLogTime = 0;
+                if (HAL_GetTick() - lastLogTime > 1000) {
+                    UART_Print("DEBUG: Motors NOT allowed by State Machine\r\n");
+                    lastLogTime = HAL_GetTick();
+                }
             }
 
             pwm.setMotorSpeeds(speeds.frontLeft, speeds.frontRight, speeds.rearLeft, speeds.rearRight);
