@@ -19,6 +19,14 @@ namespace Core {
 
     public:
         explicit PIDController(const PIDConfig& cfg) : config(cfg) {}
+
+        PIDConfig getConfig() const { 
+            return config; 
+        }
+        void setConfig(const PIDConfig& newConfig) { 
+            config = newConfig; 
+        }
+
         float calculate(float setpoint, float currentMeasuredValue, float dt) {
             float error = setpoint - currentMeasuredValue;
             float pTerm = config.kp * error;

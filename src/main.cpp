@@ -15,10 +15,10 @@
 #include "hal/timing.h"
 
 #include "core/controllers/SystemState.h"
+#include "core/controllers/CLI.h"
 
 #include <math.h>
 #include <stdio.h>
-
 
 using namespace HAL;
 using namespace Devices;
@@ -95,63 +95,30 @@ int main(void) {
 
     HAL::IBusReceiver receiver;
     receiver.init();
+
+    Core::CommandParser cli(&pidPitch, &pidRoll, &pidYaw);
+
     UART1_Start_DMA_RX(rx_buffer, 64);
     UART_Print("Receiver Initialized!\r\n");
 
-    UART_Print("Waiting for RC Link...\r\n");
     HAL::Timing::init();
 
-    char dbg[64];
-sprintf(dbg, "Micros A: %lu\r\n", HAL::Timing::getMicros());
-UART_Print(dbg);
-HAL_Delay(50);
-sprintf(dbg, "Micros B: %lu\r\n", HAL::Timing::getMicros());
-UART_Print(dbg);
+    bool calibrationRequested = false;
 
-bool calibrationRequested = false;
+    #ifndef WOKWI_SIMULATION
+    uint16_t initial_cndtr = __HAL_DMA_GET_COUNTER(&HAL::hdma_usart1_rx);
+    uint16_t initial_rx_head = (64 - initial_cndtr) % 64;
+    while (rx_tail != initial_rx_head) {
+        receiver.feedByte(rx_buffer[rx_tail]);
+        rx_tail = (rx_tail + 1) % 64;
+    }
+    #endif
 
-#ifndef WOKWI_SIMULATION
-            uint16_t rx_head = 64 - __HAL_DMA_GET_COUNTER(&HAL::hdma_usart1_rx);
-            while (rx_tail != rx_head) {
-                receiver.feedByte(rx_buffer[rx_tail]);
-                rx_tail = (rx_tail + 1) % 64;
-            }
-#endif
+    stateMachine.notifyInitComplete(calibrationRequested);
+    UART_Print("Starting Flight Loop...\r\n");
 
-            Core::ReceiverData rcData = receiver.getRCData();
-            bool is_connected = receiver.isConnected();
-
-        #ifdef WOKWI_SIMULATION
-                is_connected = true;       
-                rcData.pitch = 1500;      
-                rcData.roll = 1500;
-                rcData.yaw = 1500;
-                rcData.aux1 = 2000; 
-                static bool isSimArmed = false;
-            if (stateMachine.areMotorsAllowed()) {
-                isSimArmed = true;
-            }
-
-            if (!isSimArmed) {
-                rcData.throttle = 1000;
-            } else {
-                rcData.throttle = 1300;
-            }
-        #endif
-
-            bool armSwitch = (rcData.aux1 > 1500);
-            stateMachine.update(is_connected, armSwitch, rcData.throttle);
-
-        stateMachine.notifyInitComplete(calibrationRequested);
-
-        if (calibrationRequested) {
-            UART_Print("!!! ESC CALIBRATION MODE ACTIVATED !!!\r\n");
-        } else {
-            UART_Print("Starting Flight Loop...\r\n");
-        }
-
-        uint32_t lastLoopTimeUs = HAL::Timing::getMicros();
-        uint32_t lastPrintTimeMs = HAL_GetTick();
+    uint32_t lastLoopTimeUs = HAL::Timing::getMicros();
+    uint32_t lastPrintTimeMs = HAL_GetTick();
 
     while (1) {
         uint32_t currentTimeUs = HAL::Timing::getMicros();
@@ -163,12 +130,27 @@ bool calibrationRequested = false;
             
             if (dt <= 0.001f || dt > 0.05f) dt = 0.002f; 
 
-            #ifndef WOKWI_SIMULATION
-            uint16_t rx_head = 64 - __HAL_DMA_GET_COUNTER(&HAL::hdma_usart1_rx);
-            while (rx_tail != rx_head) {
-                receiver.feedByte(rx_buffer[rx_tail]);
-                rx_tail = (rx_tail + 1) % 64;
-            }
+            #ifdef WOKWI_SIMULATION
+                while (USART1->SR & USART_SR_RXNE) {
+                    uint8_t incomingByte = USART1->DR;
+                    
+                    char echo[2] = { (char)incomingByte, '\0' };
+                    UART_Print(echo);
+                    
+                    cli.feedChar((char)incomingByte);
+                }
+            #else
+                uint16_t cndtr = __HAL_DMA_GET_COUNTER(&HAL::hdma_usart1_rx);
+                uint16_t rx_head = (64 - cndtr) % 64; 
+                
+                while (rx_tail != rx_head) {
+                    uint8_t incomingByte = rx_buffer[rx_tail];
+                    
+                    receiver.feedByte(incomingByte);
+                    cli.feedChar((char)incomingByte); 
+                    
+                    rx_tail = (rx_tail + 1) % 64;
+                }
             #endif
 
             Core::ReceiverData rcData = receiver.getRCData();
@@ -176,20 +158,14 @@ bool calibrationRequested = false;
 
             #ifdef WOKWI_SIMULATION
                 is_connected = true;       
-                rcData.throttle = 1300;    
                 rcData.aux1 = 2000;       
                 rcData.pitch = 1500;      
                 rcData.roll = 1500;
                 rcData.yaw = 1500;
-            #endif
-
-            #ifdef WOKWI_SIMULATION
-                is_connected = true;       
-                rcData.throttle = 1300;    
-                rcData.aux1 = 2000;       
-                rcData.pitch = 1500;      
-                rcData.roll = 1500;
-                rcData.yaw = 1500;
+                
+                static bool isSimArmed = false;
+                if (stateMachine.areMotorsAllowed()) isSimArmed = true;
+                rcData.throttle = isSimArmed ? 1300 : 1000;
             #endif
 
             bool armSwitch = (rcData.aux1 > 1500);
@@ -233,18 +209,20 @@ bool calibrationRequested = false;
                 filterYaw.reset();
             }
 
-            if (!stateMachine.areMotorsAllowed()) {
-                static uint32_t lastLogTime = 0;
-                if (HAL_GetTick() - lastLogTime > 1000) {
-                    UART_Print("DEBUG: Motors NOT allowed by State Machine\r\n");
-                    lastLogTime = HAL_GetTick();
-                }
-            }
-
             pwm.setMotorSpeeds(speeds.frontLeft, speeds.frontRight, speeds.rearLeft, speeds.rearRight);
 
             uint32_t currentTimeMs = HAL_GetTick();
-            if (currentTimeMs - lastPrintTimeMs >= 100) {
+
+            static bool testCmdSent = false;
+            if (!testCmdSent && currentTimeMs > 5000) {
+                const char* testCmd = "SET PITCH P 3.14\r\n";
+                for(int i = 0; testCmd[i] != '\0'; i++) {
+                    cli.feedChar(testCmd[i]);
+                }
+                testCmdSent = true;
+            }
+
+            if (currentTimeMs - lastPrintTimeMs >= 1000) {
                 char msg[140];
                 sprintf(msg, "STATE: %d | Thr: %d | Pit: %d || M1: %d | M3: %d\r\n", 
                         static_cast<int>(stateMachine.getState()), rcData.throttle, (int)cleanPitch, speeds.frontLeft, speeds.rearLeft);

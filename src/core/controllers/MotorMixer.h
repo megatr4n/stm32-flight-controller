@@ -1,5 +1,6 @@
 #pragma once
 #include <stdint.h>
+#include <cmath>
 
 namespace Core {
     
@@ -13,6 +14,9 @@ namespace Core {
     class MotorMixer {
         private:
         static uint16_t constrain(float val) {
+            if (std::isnan(val)) {
+                return 1000;
+            }
             if (val < 1000.0f) {
                 return 1000;
             }
