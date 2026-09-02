@@ -20,7 +20,7 @@
 #define configUSE_COUNTING_SEMAPHORES           1
 #define configUSE_PORT_OPTIMISED_TASK_SELECTION 0
 
-/* Ко-рутини не використовуємо */
+/* Ко-рутини не юзаємо */
 #define configUSE_CO_ROUTINES                   0
 #define configMAX_CO_ROUTINE_PRIORITIES         ( 2 )
 
@@ -50,6 +50,6 @@
 /* Макроси для перехоплення системних таймерів STM32Cube */
 #define vPortSVCHandler    SVC_Handler
 #define xPortPendSVHandler PendSV_Handler
-#define xPortSysTickHandler SysTick_Handler
+//#define xPortSysTickHandler SysTick_Handler
 
-#endif /* FREERTOS_CONFIG_H */
+#endif 
